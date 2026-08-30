@@ -1,0 +1,407 @@
+<?xml version="1.0"?>
+<!DOCTYPE workflow
+[
+	<!-- Whether to run the transfer job for derecho (via globus) -->
+	<!ENTITY TRANSFER_DERECHO_ON "true">
+	<!-- Whether to run the transfer job for AWS S3 -->
+	<!ENTITY TRANSFER_AWS_ON "true">
+
+	<!-- Root directory for the filter_dump package -->
+	<!ENTITY SCRIPT_DIR "/scratch3/NAGAPE/epic/Walter.Kolczynski/save/filter_dump">
+
+	<!-- Source location for dump data -->
+	<!ENTITY DUMP_SOURCE "/scratch3/NCEPDEV/global/role.glopara/dump">
+	<!-- Output location for local santized dump -->
+	<!ENTITY OUT_DIR "/scratch3/NAGAPE/epic/Walter.Kolczynski/noscrub">
+	<!-- Temporary location for IODA conversion -->
+	<!ENTITY IODA_TMP "/scratch3/NAGAPE/epic/Walter.Kolczynski/noscrub/stmp/obsForge">
+
+	<!-- Target URI for AWS S3 bucket -->
+	<!ENTITY AWS_TARGET "s3://noaa-epic-global-release-pds">
+	<!-- Name of the profile with the correct AWS credential -->
+	<!ENTITY AWS_PROFILE "epic">
+	<!-- Ursa globus ID (established by RDHPCS, should not need to be changed) -->
+	<!ENTITY URSA_GLOBUS_ID "8bbc822a-a625-4058-b68e-65edacd73828">
+	<!-- Derecho globus ID (established by user, point share to root global shared directory) -->
+	<!ENTITY DERECHO_GLOBUS_ID "aa1e0f82-1bb9-4e0a-acfd-69e1ccc72ce0">
+	
+	<!-- Rocoto workflow control -->
+	<!ENTITY PSLOT "filter_dump">
+	<!ENTITY CYCLE_THROTTLE "2">
+	<!ENTITY TASK_THROTTLE "40">
+	<!ENTITY MAXTRIES "1">
+
+	<!-- Job scheduler settings -->
+	<!ENTITY ACCOUNT "epic">
+	<!ENTITY SCHEDULER "slurm">
+	<!ENTITY COMPUTE_QUEUE "batch">
+	<!ENTITY TRANSFER_QUEUE "batch">
+	<!ENTITY COMPUTE_PART "u1-compute">
+	<!ENTITY TRANSFER_PART "u1-service">
+]>
+
+<workflow realtime="F" cyclethrottle="&CYCLE_THROTTLE;" scheduler="&SCHEDULER;" taskthrottle="&TASK_THROTTLE;">
+
+	<log><cyclestr>&OUT_DIR;/filter_dump_logs/@Y@m@d_@H/filter_dump.log</cyclestr></log>
+	
+	<!-- List as many different cycles definitions as needed -->
+	<cycledef group="dump">202601010000 202601010000 06:00:00</cycledef>
+
+<!-- 	<cycledef group="dump">202103241200 202103250000 06:00:00</cycledef>
+	<cycledef group="dump">202112201200 202112221800 06:00:00</cycledef>
+	<cycledef group="dump">202205150600 202205151800 06:00:00</cycledef>
+	<cycledef group="dump">202304011800 202304020000 06:00:00</cycledef>
+	<cycledef group="dump">202402231800 202402240600 06:00:00</cycledef> -->
+
+	<task name="make_nr_dump" cycledefs="dump" maxtries="&MAXTRIES;">
+		<jobname><cyclestr>merge_@Y@m@d_@H</cyclestr></jobname>
+		<account>&ACCOUNT;</account>
+		<join><cyclestr>&OUT_DIR;/filter_dump_logs/@Y@m@d_@H/make_nr_dump.log</cyclestr></join>
+		<walltime>03:00:00</walltime>
+		<queue>&COMPUTE_QUEUE;</queue>
+		<partition>&COMPUTE_PART;</partition>
+		<nodes>1:ppn=1:tpp=1</nodes>
+		<memory>4048M</memory>
+
+		<command><cyclestr>&SCRIPT_DIR;/make_nr_dump.sh &DUMP_SOURCE; &OUT_DIR;/dump_nr @Y@m@d @H</cyclestr></command>
+	</task>
+	<!--
+		============================================
+		Task: gfs_aod_dump
+		============================================
+	-->
+	<task name="gfs_aod_dump" cycledefs="dump" maxtries="&MAXTRIES;">
+		<command>&SCRIPT_DIR;/obsForge/dev/job_cards/rocoto/aoddump.sh</command>
+
+		<jobname><cyclestr>obsforge_gfs_aod_dump_@H</cyclestr></jobname>
+		<account>&ACCOUNT;</account>
+		<queue>&COMPUTE_QUEUE;</queue>
+		<partition>&COMPUTE_PART;</partition>
+		<walltime>00:10:00</walltime>
+		<nodes>1:ppn=1:tpp=1</nodes>
+		<memory>96GB</memory>
+		<native>--export=NONE</native>
+
+		<join><cyclestr>&OUT_DIR;/filter_dump_logs/@Y@m@d_@H/gfs_aod_dump_prep.log</cyclestr></join>
+
+		<envar><name>RUN_ENVIR</name><value>emc</value></envar>
+		<envar><name>HOMEobsforge</name><value>&SCRIPT_DIR;/obsForge</value></envar>
+		<envar><name>NET</name><value>gfs</value></envar>
+		<envar><name>RUN</name><value>gfs</value></envar>
+		<envar><name>CDATE</name><value><cyclestr>@Y@m@d@H</cyclestr></value></envar>
+		<envar><name>PDY</name><value><cyclestr>@Y@m@d</cyclestr></value></envar>
+		<envar><name>cyc</name><value><cyclestr>@H</cyclestr></value></envar>
+		<envar><name>KEEPDATA</name><value>NO</value></envar>
+		<envar><name>COMROOT</name><value>&OUT_DIR;</value></envar>
+		<envar><name>DCOMROOT</name><value>/null</value></envar>
+		<envar><name>DATAROOT</name><value><cyclestr>&IODA_TMP;/gfs.@Y@m@d/@H</cyclestr></value></envar>
+
+		<dependency>
+			<taskdep task="make_nr_dump"/>
+		</dependency>
+
+	</task>
+
+	<!--
+		============================================
+		Task: gdas_aod_dump
+		============================================
+	-->
+	<task name="gdas_aod_dump" cycledefs="dump" maxtries="&MAXTRIES;">
+
+		<command>&SCRIPT_DIR;/obsForge/dev/job_cards/rocoto/aoddump.sh</command>
+
+		<jobname><cyclestr>obsforge_gdas_aod_dump_@H</cyclestr></jobname>
+		<account>&ACCOUNT;</account>
+		<queue>&COMPUTE_QUEUE;</queue>
+		<partition>&COMPUTE_PART;</partition>
+		<walltime>00:10:00</walltime>
+		<nodes>1:ppn=1:tpp=1</nodes>
+		<memory>96GB</memory>
+		<native>--export=NONE</native>
+
+		<join><cyclestr>&OUT_DIR;/filter_dump_logs/@Y@m@d_@H/gdas_aod_dump_prep.log</cyclestr></join>
+
+		<envar><name>RUN_ENVIR</name><value>emc</value></envar>
+		<envar><name>HOMEobsforge</name><value>&SCRIPT_DIR;/obsForge</value></envar>
+		<envar><name>NET</name><value>gfs</value></envar>
+		<envar><name>RUN</name><value>gdas</value></envar>
+		<envar><name>CDATE</name><value><cyclestr>@Y@m@d@H</cyclestr></value></envar>
+		<envar><name>PDY</name><value><cyclestr>@Y@m@d</cyclestr></value></envar>
+		<envar><name>cyc</name><value><cyclestr>@H</cyclestr></value></envar>
+		<envar><name>KEEPDATA</name><value>NO</value></envar>
+		<envar><name>COMROOT</name><value>&OUT_DIR;</value></envar>
+		<envar><name>DCOMROOT</name><value>/null</value></envar>
+		<envar><name>DATAROOT</name><value><cyclestr>&OUT_DIR;/dump_ioda_nr/gdas.@Y@m@d/@H</cyclestr></value></envar>
+
+		<dependency>
+			<taskdep task="make_nr_dump"/>
+		</dependency>
+
+	</task>
+
+	<!--
+		============================================
+		Task: gfs_atmos_bufr_dump
+		============================================
+	-->
+	<task name="gfs_atmos_bufr_dump" cycledefs="dump" maxtries="&MAXTRIES;">
+
+		<command>&SCRIPT_DIR;/obsForge/dev/job_cards/rocoto/atmosbufrdump.sh</command>
+
+		<jobname><cyclestr>obsforge_gdas_atmos_bufr_dump_@H</cyclestr></jobname>
+		<account>&ACCOUNT;</account>
+		<queue>&COMPUTE_QUEUE;</queue>
+		<partition>&COMPUTE_PART;</partition>
+		<walltime>00:20:00</walltime>
+		<nodes>1:ppn=80:tpp=1</nodes>
+		<memory>256GB</memory>
+		<native>--export=NONE</native>
+
+		<join><cyclestr>&OUT_DIR;/filter_dump_logs/@Y@m@d_@H/gdas_atmos_bufr_dump_prep.log</cyclestr></join>
+
+		<envar><name>RUN_ENVIR</name><value>emc</value></envar>
+		<envar><name>HOMEobsforge</name><value>&SCRIPT_DIR;/obsForge</value></envar>
+		<envar><name>NET</name><value>gfs</value></envar>
+		<envar><name>RUN</name><value>gfs</value></envar>
+		<envar><name>CDATE</name><value><cyclestr>@Y@m@d@H</cyclestr></value></envar>
+		<envar><name>PDY</name><value><cyclestr>@Y@m@d</cyclestr></value></envar>
+		<envar><name>cyc</name><value><cyclestr>@H</cyclestr></value></envar>
+		<envar><name>KEEPDATA</name><value>NO</value></envar>
+		<envar><name>COMROOT</name><value>&OUT_DIR;</value></envar>
+		<envar><name>DCOMROOT</name><value>/null</value></envar>
+		<envar><name>DATAROOT</name><value><cyclestr>&IODA_TMP;/gfs.@Y@m@d/@H</cyclestr></value></envar>
+	    <envar><name>OBSPROC_COMROOT</name><value>&OUT_DIR;/dump_nr</value></envar>
+
+		<dependency>
+			<taskdep task="make_nr_dump"/>
+		</dependency>
+
+	</task>
+
+	<!--
+		============================================
+		Task: gdas_atmos_bufr_dump
+		============================================
+	-->
+	<task name="gdas_atmos_bufr_dump" cycledefs="dump" maxtries="&MAXTRIES;">
+
+		<command>&SCRIPT_DIR;/obsForge/dev/job_cards/rocoto/atmosbufrdump.sh</command>
+
+		<jobname><cyclestr>obsforge_gdas_atmos_bufr_dump_@H</cyclestr></jobname>
+		<account>&ACCOUNT;</account>
+		<queue>&COMPUTE_QUEUE;</queue>
+		<partition>&COMPUTE_PART;</partition>
+		<walltime>00:20:00</walltime>
+		<nodes>1:ppn=80:tpp=1</nodes>
+		<memory>256GB</memory>
+		<native>--export=NONE</native>
+
+		<join><cyclestr>&OUT_DIR;/filter_dump_logs/@Y@m@d_@H/gdas_atmos_bufr_dump_prep.log</cyclestr></join>
+
+		<envar><name>RUN_ENVIR</name><value>emc</value></envar>
+		<envar><name>HOMEobsforge</name><value>&SCRIPT_DIR;/obsForge</value></envar>
+		<envar><name>NET</name><value>gfs</value></envar>
+		<envar><name>RUN</name><value>gdas</value></envar>
+		<envar><name>CDATE</name><value><cyclestr>@Y@m@d@H</cyclestr></value></envar>
+		<envar><name>PDY</name><value><cyclestr>@Y@m@d</cyclestr></value></envar>
+		<envar><name>cyc</name><value><cyclestr>@H</cyclestr></value></envar>
+		<envar><name>KEEPDATA</name><value>NO</value></envar>
+		<envar><name>COMROOT</name><value>&OUT_DIR;</value></envar>
+		<envar><name>DCOMROOT</name><value>/null</value></envar>
+		<envar><name>DATAROOT</name><value><cyclestr>&OUT_DIR;/dump_ioda_nr/gdas.@Y@m@d/@H</cyclestr></value></envar>
+		<envar><name>OBSPROC_COMROOT</name><value>&OUT_DIR;/dump_nr</value></envar>
+
+		<dependency>
+			<taskdep task="make_nr_dump"/>
+		</dependency>
+
+	</task>
+
+	<!--
+		============================================
+		Task: gfs_marine_dump
+		============================================
+	-->
+	<task name="gfs_marine_dump" cycledefs="dump" maxtries="&MAXTRIES;">
+
+		<command>&SCRIPT_DIR;/obsForge/dev/job_cards/rocoto/marinedump.sh</command>
+
+		<jobname><cyclestr>obsforge_gfs_marine_dump_@H</cyclestr></jobname>
+		<account>&ACCOUNT;</account>
+		<queue>&COMPUTE_QUEUE;</queue>
+		<partition>&COMPUTE_PART;</partition>
+		<walltime>00:10:00</walltime>
+		<nodes>1:ppn=20:tpp=2</nodes>
+		<memory>32GB</memory>
+		<native>--export=NONE</native>
+
+		<join><cyclestr>&OUT_DIR;/filter_dump_logs/@Y@m@d_@H/gfs_marine_dump_prep.log</cyclestr></join>
+
+		<envar><name>RUN_ENVIR</name><value>emc</value></envar>
+		<envar><name>HOMEobsforge</name><value>&SCRIPT_DIR;/obsForge</value></envar>
+		<envar><name>NET</name><value>gfs</value></envar>
+		<envar><name>RUN</name><value>gfs</value></envar>
+		<envar><name>CDATE</name><value><cyclestr>@Y@m@d@H</cyclestr></value></envar>
+		<envar><name>PDY</name><value><cyclestr>@Y@m@d</cyclestr></value></envar>
+		<envar><name>cyc</name><value><cyclestr>@H</cyclestr></value></envar>
+		<envar><name>KEEPDATA</name><value>NO</value></envar>
+		<envar><name>COMROOT</name><value>&OUT_DIR;</value></envar>
+		<envar><name>DCOMROOT</name><value>/null</value></envar>
+		<envar><name>DATAROOT</name><value><cyclestr>&IODA_TMP;/gfs.@Y@m@d/@H</cyclestr></value></envar>
+
+		<dependency>
+			<taskdep task="make_nr_dump"/>
+		</dependency>
+
+	</task>
+
+	<!--
+		============================================
+		Task: gfs_marine_bufr_dump
+		============================================
+	-->
+	<task name="gfs_marine_bufr_dump" cycledefs="dump" maxtries="&MAXTRIES;">
+
+		<command>&SCRIPT_DIR;/obsForge/dev/job_cards/rocoto/marinebufrdump.sh</command>
+
+		<jobname><cyclestr>obsforge_gfs_marine_bufr_dump_@H</cyclestr></jobname>
+		<account>&ACCOUNT;</account>
+		<queue>&COMPUTE_QUEUE;</queue>
+		<partition>&COMPUTE_PART;</partition>
+		<walltime>00:10:00</walltime>
+		<nodes>1:ppn=1:tpp=1</nodes>
+		<memory>32GB</memory>
+		<native>--export=NONE</native>
+
+		<join><cyclestr>&OUT_DIR;/filter_dump_logs/@Y@m@d_@H/gfs_marine_bufr_dump_prep.log</cyclestr></join>
+
+		<envar><name>RUN_ENVIR</name><value>emc</value></envar>
+		<envar><name>HOMEobsforge</name><value>&SCRIPT_DIR;/obsForge</value></envar>
+		<envar><name>NET</name><value>gfs</value></envar>
+		<envar><name>RUN</name><value>gfs</value></envar>
+		<envar><name>CDATE</name><value><cyclestr>@Y@m@d@H</cyclestr></value></envar>
+		<envar><name>PDY</name><value><cyclestr>@Y@m@d</cyclestr></value></envar>
+		<envar><name>cyc</name><value><cyclestr>@H</cyclestr></value></envar>
+		<envar><name>KEEPDATA</name><value>NO</value></envar>
+		<envar><name>COMROOT</name><value>&OUT_DIR;</value></envar>
+		<envar><name>DCOMROOT</name><value>/null</value></envar>
+		<envar><name>DATAROOT</name><value><cyclestr>&IODA_TMP;/gfs.@Y@m@d/@H</cyclestr></value></envar>
+		
+		<dependency>
+			<taskdep task="make_nr_dump"/>
+		</dependency>
+
+	</task>
+
+	<!--
+		============================================
+		Task: gdas_marine_bufr_dump
+		============================================
+	-->
+	<task name="gdas_marine_bufr_dump" cycledefs="dump" maxtries="&MAXTRIES;">
+
+		<command>&SCRIPT_DIR;/obsForge/dev/job_cards/rocoto/marinebufrdump.sh</command>
+
+		<jobname><cyclestr>obsforge_gdas_marine_bufr_dump_@H</cyclestr></jobname>
+		<account>&ACCOUNT;</account>
+		<queue>&COMPUTE_QUEUE;</queue>
+		<partition>&COMPUTE_PART;</partition>
+		<walltime>00:10:00</walltime>
+		<nodes>1:ppn=1:tpp=1</nodes>
+		<memory>32GB</memory>
+		<native>--export=NONE</native>
+
+		<join><cyclestr>&OUT_DIR;/filter_dump_logs/@Y@m@d_@H/gdas_marine_bufr_dump_prep.log</cyclestr></join>
+
+		<envar><name>RUN_ENVIR</name><value>emc</value></envar>
+		<envar><name>HOMEobsforge</name><value>&SCRIPT_DIR;/obsForge</value></envar>
+		<envar><name>NET</name><value>gdas</value></envar>
+		<envar><name>RUN</name><value>gdas</value></envar>
+		<envar><name>CDATE</name><value><cyclestr>@Y@m@d@H</cyclestr></value></envar>
+		<envar><name>PDY</name><value><cyclestr>@Y@m@d</cyclestr></value></envar>
+		<envar><name>cyc</name><value><cyclestr>@H</cyclestr></value></envar>
+		<envar><name>KEEPDATA</name><value>NO</value></envar>
+		<envar><name>COMROOT</name><value>&OUT_DIR;</value></envar>
+		<envar><name>DCOMROOT</name><value>/null</value></envar>
+		<envar><name>DATAROOT</name><value><cyclestr>&OUT_DIR;/dump_ioda_nr/gdas.@Y@m@d/@H</cyclestr></value></envar>
+		
+		<dependency>
+			<taskdep task="make_nr_dump"/>
+		</dependency>
+
+	</task>
+
+	<task name="aws_transfer" cycledefs="dump" maxtries="&MAXTRIES;">
+		<jobname><cyclestr>transfer_@Y@m@d_@H</cyclestr></jobname>
+		<account>&ACCOUNT;</account>
+		<join><cyclestr>&OUT_DIR;/filter_dump_logs/@Y@m@d_@H/aws_transfer.log</cyclestr></join>
+		<walltime>03:00:00</walltime>
+		<queue>&TRANSFER_QUEUE;</queue>
+		<partition>&TRANSFER_PART;</partition>
+		<nodes>1:ppn=1:tpp=1</nodes>
+		<memory>4048M</memory>
+
+		<command><cyclestr>&SCRIPT_DIR;/aws_transfer.sh &OUT_DIR; &AWS_TARGET; @Y@m@d @H &AWS_PROFILE;</cyclestr></command>
+
+		<dependency>
+			<and>
+				<streq><left>&TRANSFER_AWS_ON;</left><right>true</right></streq>
+				<taskdep task="gfs_aod_dump"/>
+				<taskdep task="gdas_aod_dump"/>
+				<taskdep task="gfs_atmos_bufr_dump"/>
+				<taskdep task="gdas_atmos_bufr_dump"/>
+				<taskdep task="gfs_marine_dump"/>
+				<taskdep task="gfs_marine_bufr_dump"/>
+				<taskdep task="gdas_marine_bufr_dump"/>
+			</and>
+		</dependency>
+	</task>
+
+	<task name="derecho_transfer" cycledefs="dump" maxtries="&MAXTRIES;">
+		<jobname><cyclestr>transfer_@Y@m@d_@H</cyclestr></jobname>
+		<account>&ACCOUNT;</account>
+		<join><cyclestr>&OUT_DIR;/filter_dump_logs/@Y@m@d_@H/derecho_transfer.log</cyclestr></join>
+		<walltime>03:00:00</walltime>
+		<queue>&TRANSFER_QUEUE;</queue>
+		<partition>&TRANSFER_PART;</partition>
+		<nodes>1:ppn=1:tpp=1</nodes>
+		<memory>4048M</memory>
+
+		<command><cyclestr>&SCRIPT_DIR;/globus_transfer.sh &URSA_GLOBUS_ID; &DERECHO_GLOBUS_ID; &OUT_DIR; @Y@m@d @H</cyclestr></command>
+
+		<dependency>
+			<and>
+				<streq><left>&TRANSFER_DERECHO_ON;</left><right>true</right></streq>
+				<taskdep task="gfs_aod_dump"/>
+				<taskdep task="gdas_aod_dump"/>
+				<taskdep task="gfs_atmos_bufr_dump"/>
+				<taskdep task="gdas_atmos_bufr_dump"/>
+				<taskdep task="gfs_marine_dump"/>
+				<taskdep task="gfs_marine_bufr_dump"/>
+				<taskdep task="gdas_marine_bufr_dump"/>
+			</and>
+		</dependency>
+	</task>
+
+	<task name="cleanup" cycledefs="dump" maxtries="&MAXTRIES;">
+		<jobname><cyclestr>transfer_@Y@m@d_@H</cyclestr></jobname>
+		<account>&ACCOUNT;</account>
+		<join><cyclestr>&OUT_DIR;/filter_dump_logs/@Y@m@d_@H/cleanup.log</cyclestr></join>
+		<walltime>00:10:00</walltime>
+		<queue>&COMPUTE_QUEUE;</queue>
+		<partition>&COMPUTE_PART;</partition>
+		<nodes>1:ppn=1:tpp=1</nodes>
+		<memory>1024M</memory>
+
+		<command><cyclestr>&SCRIPT_DIR;/cleanup.sh &OUT_DIR; @Y@m@d @H</cyclestr></command>
+
+		<dependency>
+			<and>
+				<taskdep task="aws_transfer"/>
+				<taskdep task="derecho_transfer"/>
+			</and>
+		</dependency>
+	</task>
+
+</workflow>

@@ -1,0 +1,3 @@
+[submodule "obsForge"]
+	path = obsForge
+	url = git@github.com:NOAA-EMC/obsForge.git
